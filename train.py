@@ -1,5 +1,6 @@
 import torch
 import argparse
+import torch.nn as nn
 
 from torchvision import transforms
 
@@ -15,6 +16,10 @@ def get_args():
     args.add_argument('--device', type=str, default='auto')
     args.add_argument('--data_name', type=str, default='cifar10', choices=['mnist', 'cifar10'])
     args.add_argument('--batch_size', type=int, default=128)
+    args.add_argument('--optimizer', type=str, default='adam', choices=['sgd', 'adam', 'adamw'])
+    args.add_argument('--lr', type=float, default=1e-3)
+    args.add_argument('--weight_decay', type=float, default=1e-5)
+    args.add_argument('--grad_clip', type=float, default=1.0, help="set to negative value to disable grad clip")
 
 
     args.add_argument('--train_path', type=str, default='./data/train')
@@ -36,7 +41,31 @@ def get_args():
 
 
 class Trainer:
-    pass
+    def __init__(self,
+                 loss_generator: nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 args,
+                 utils: Utils,
+                 device: str = 'cpu',
+                 **kwargs):
+
+        
+        self.loss_generator = loss_generator
+        self.model = loss_generator.model
+        self.optimizer = optimizer
+        self.args = args
+        self.utils = utils
+        self.device = device
+
+
+
+    def train():
+        pass
+
+    def validate():
+        pass
+
+
 
 
 def main():
@@ -85,9 +114,19 @@ def main():
     
     model = utils._get_model(model_name=args.model, img_size=args.img_size).to(device)
     loss_generator = utils._get_loss_generator(model_name=args.model).to(device)
+    optimizer = utils._setup_optimizer(params=loss_generator.model.parameters(), args=args)
+
+    trainer = Trainer(loss_generator=loss_generator,
+                      optimizer=optimizer,
+                      args=args,
+                      utils=utils,
+                      device=device
+                      )
     
 
-    
+    trainer.train()
+    trainer.validate()
+
 
 if __name__ == "__main__":
     main()

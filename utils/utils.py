@@ -6,6 +6,9 @@ import torch.nn as nn
 
 from PIL import Image
 from torchvision import transforms, datasets
+from torch.optim import SGD, Adam, AdamW
+
+from .scheduler import get_scheduler
 
 from ..models import VAE
 from ..loss_generator import VAELossGenerator
@@ -62,6 +65,7 @@ class Utils:
             raise NotImplementedError(f'Model {model_name} is not implemented.')
         
 
+    @staticmethod
     def _get_loss_generator(self, model: nn.Module, **kwargs):
         loss_name = loss_name.lower()
 
@@ -69,5 +73,51 @@ class Utils:
             return VAELossGenerator(model, **kwargs)
         else:
             raise NotImplementedError(f'Loss generator {loss_name} is not implemented.')
+
+    @staticmethod   
+    def _get_scheduler(self,
+                       optimizer,
+                       scheduler_name: str = 'constant',
+                       warmup_epochs: int = 0,
+                       warmup_start_lr: int = 0.0,
+                       total_epochs: int = -1,
+                       min_lr: float = 1e-6,
+                       milestones: list[int] = None,
+                       gamma: float = 0.1):
+        return get_scheduler(optimizer,
+                             scheduler_name,
+                             warmup_epochs,
+                             warmup_start_lr,
+                             total_epochs,
+                             min_lr,
+                             milestones,
+                             gamma)
+    
+    @staticmethod
+    def _setup_optimizer(self, params, args):
+        
+        optimizer_name = args.optimizer.lower()
+        if optimizer_name == 'sgd':
+            return SGD(params,
+                       lr = args.lr,
+                       momentum=0.9,
+                       weight_decay=args.weight_decay
+                       )
+        
+        elif optimizer_name == 'adam':
+            return Adam(params,
+                        lr=args.lr,
+                        betas=(0.9, 0.999), # uses default (change if needed)
+                        weight_decay=args.weight_decay
+                        )
+        
+        elif optimizer_name == 'adamw':
+            return AdamW(params,
+                        lr=args.lr,
+                        betas=(0.9, 0.999), # uses default (change if needed)
+                        weight_decay=args.weight_decay
+                        )
+    
+
         
         

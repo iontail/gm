@@ -3,6 +3,11 @@ import torch.nn as nn
 
 from .models import VAE
 
+"""
+The target model should be assigned to self.model!!
+
+This limitation is for the alignment with Trainer class
+"""
 
 class VAELossGenerator(nn.Module):
     def __init__(self, args):
