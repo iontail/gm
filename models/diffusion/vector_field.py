@@ -41,9 +41,19 @@ class ConditionalVectorFieldSDE(SDE):
     
 
 class LearnedVectorField(SDE):
+    """
+    SDE equals to ODe when diffusion_coefficient = 0 (when sigma = 0)
+    """
     def __init__(self, net: nn.Module, sigma: float = 0):
-        """
-        
-        """
+        super().__init__()
+        self.net = net
+        self.sigma = sigma
+
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor):
+        return self.net(x, t)
+    
+    def diffusion_coefficient(self, x: torch.Tensor, t: torch.Tensor):
+        return self.sigma * torch.randn_like(x)
+
        
         

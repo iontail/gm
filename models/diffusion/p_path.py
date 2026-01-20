@@ -181,9 +181,9 @@ class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
     def conditional_vector_field(self, x: torch.Tensor, z: torch.Tensor, t: torch.Tensor):
         alpha_t = self.alpha(t)
         beta_t = self.beta(t)
-        alpha_dt = self.alpha.dt(t)
-        beta_dt = self.beta.dt(t)
-        return (alpha_dt - beta_dt / beta_t * alpha_t) * z + beta_dt / beta_t * x
+        dt_alpha_t = self.alpha.dt(t)
+        dt_beta_t = self.beta.dt(t)
+        return (dt_alpha_t - dt_beta_t / beta_t * alpha_t) * z + dt_beta_t / beta_t * x
     
     def conditional_score(self, x: torch.Tensor, z: torch.Tensor, t: torch.Tensor):
         alpha_t = self.alpha(t)
