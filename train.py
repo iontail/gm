@@ -4,7 +4,7 @@ import torch.nn as nn
 
 from torchvision import transforms
 
-from loss_generator import VAELossGenerator
+from trainer import VAELossGenerator
 from utils import get_dataloader, Utils
 
 
@@ -15,6 +15,9 @@ def get_args():
     args.add_argument('--seed', type=int, default=42)
     args.add_argument('--device', type=str, default='auto')
     args.add_argument('--data_name', type=str, default='cifar10', choices=['mnist', 'cifar10'])
+
+
+    args.add_argument('--epochs', type=int, default=100)
     args.add_argument('--batch_size', type=int, default=128)
     args.add_argument('--optimizer', type=str, default='adam', choices=['sgd', 'adam', 'adamw'])
     args.add_argument('--lr', type=float, default=1e-3)
@@ -113,7 +116,7 @@ def main():
                                     )
     
     model = utils._get_model(model_name=args.model, img_size=args.img_size).to(device)
-    loss_generator = utils._get_loss_generator(model_name=args.model).to(device)
+    loss_generator = utils._get_trainer(model_name=args.model).to(device)
     optimizer = utils._setup_optimizer(params=loss_generator.model.parameters(), args=args)
 
     trainer = Trainer(loss_generator=loss_generator,

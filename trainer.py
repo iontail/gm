@@ -2,16 +2,85 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torch.utils.data import DataLoader
+from abc import ABC, abstractmethod
+from tqdm import tqdm
+
+from utils import Utils
 from .models import VAE
 from .models.diffusion import ConditionalProbabilityPath, Alpha, Beta, LinearAlpha, SquareRootBeta
 
 """
 The target model should be assigned to self.model!!
 
-This limitation is for the alignment with Trainer class
+This condition is for the alignment with Trainer class
 """
 
-class VAELossGenerator(nn.Module):
+class Trainer(ABC):
+    def __init__(self,
+                 model: nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 args,
+                 utils: Utils = Utils(),
+                 device: str = 'cpu',
+                 **kwargs):
+
+    
+        self.model = model
+        self.optimizer = optimizer
+        self.args = args
+        self.utils = utils
+        self.device = device
+
+    @abstractmethod
+    def get_loss(self, x: torch.Tensr):
+        pass
+
+    def train(self, dl: DataLoader, val_dl: DataLoader = None):
+
+        
+        epochs = self.args.epochs
+
+        for epoch in range(epochs):
+            self.model.train()
+
+            total_loss = 0
+            samples = 0
+            for i, batch in enumerate(tqdm(dl, leave=False)):
+                loss = self.get_loss(batch)
+
+                self.optimizer.zero_grad()
+                loss.backward()
+
+                if self.args.grad_clip() > 0:
+                    nn.utils.clip_grad_norm(self.model.parameters(), self.args.grad_clip)
+                self.optimizer.step()
+
+                total_loss += loss.item() * batch.shape[0]
+                samples += batch.shape[0]
+
+            total_loss /= samples
+
+            if val_dl is not None:
+                self.validate(val_dl)
+
+    def validate(self, dl: DataLoader):
+        self.model.eval()
+
+        total_loss = 0
+        samples = 0
+        for batch in enumerate(tqdm(dl, leave=False)):
+            loss = self.get_loss(batch)
+
+            total_loss += loss.item() * batch.shape[0]
+            samples += batch.shape[0]
+
+        total_loss /= samples
+
+        print(f"Validation Loss: {total_loss:.5f}")
+
+
+class VAETrainer(Trainer):
     def __init__(self, args):
         super().__init__()
 
@@ -20,7 +89,7 @@ class VAELossGenerator(nn.Module):
         self.recon_loss_fn = nn.MSELoss(reduction='sum')
         self.kld_loss_fn = nn.KLDivLoss(reduction='sum')
         
-    def forward(self, x: torch.Tensor):
+    def get_loss(self, x: torch.Tensor):
         """
         Return reconstruction loss and KL divergence loss
         Args:
@@ -124,7 +193,7 @@ class RepresentationTransformer(nn.Module):
         return self.score2vf(self.noise2score(x, t), t)
 
         
-class ConditionalFlowMatchingLossGenerator:
+class ConditionalFlowMatchingTrainer(Trainer):
     """
     Generate the flow matching loss:
     E_{z ~ p_data, t ~ Unif[0, 1], x ~ p_t(x|z)}[||u_theta - u_target||^2]
@@ -137,7 +206,7 @@ class ConditionalFlowMatchingLossGenerator:
         self.path = path
         self.model = model
 
-    def forward(self, batch_size: int):
+    def get_loss(self, batch_size: int):
         z = self.path.p_data.sample(batch_size) # (bs, dim)
         t = torch.rand(batch_size, 1).to(z)     # (bs, 1)
         x = self.path.sample_conditional_path(x, z, t)
@@ -148,7 +217,7 @@ class ConditionalFlowMatchingLossGenerator:
         return mse
 
 
-class ConditionalScoreMatchingLossGenerator:
+class ConditionalScoreMatchingTrainer(Trainer):
     """
     Generate the score matching loss:
     E_{z ~ p_data, t ~ Unif[0, 1], x ~ p_t(x|z)}[||s_theta - s_target||^2]
@@ -161,7 +230,7 @@ class ConditionalScoreMatchingLossGenerator:
         self.path = path
         self.model = model
 
-    def forward(self, batch_size: int):
+    def get_loss(self, batch_size: int):
         z = self.path.p_data.sample(batch_size) # (bs, dim)
         t = torch.rand(batch_size, 1).to(z)     # (bs, 1)
         x = self.path.sample_conditional_path(x, z, t)

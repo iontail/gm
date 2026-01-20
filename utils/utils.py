@@ -11,7 +11,7 @@ from torch.optim import SGD, Adam, AdamW
 from .scheduler import get_scheduler
 
 from ..models import VAE
-from ..loss_generator import VAELossGenerator
+from ..trainer import *
 
 
 
@@ -66,11 +66,11 @@ class Utils:
         
 
     @staticmethod
-    def _get_loss_generator(self, model: nn.Module, **kwargs):
+    def _get_trainer(self, model: nn.Module, **kwargs):
         loss_name = loss_name.lower()
 
         if loss_name == 'vae':
-            return VAELossGenerator(model, **kwargs)
+            return VAETrainer(model, **kwargs)
         else:
             raise NotImplementedError(f'Loss generator {loss_name} is not implemented.')
 
