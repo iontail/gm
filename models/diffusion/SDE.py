@@ -1,7 +1,9 @@
 import torch
 
-from .density_utils import Density
 from abc import ABC, abstractmethod
+
+from .density_utils import Density
+from .diffusion_models import *
 
 
 """
@@ -82,3 +84,53 @@ class LangevinSDE(SDE):
     def diffusion_coefficient(self, xt: torch.Tensor, t: torch.Tensor):
         return self.sigma * torch.ones_like(xt)
     
+
+# ---------------
+# Trained
+# ---------------
+class LearnedBVectorFieldODE(ODE):
+    def __init__(self, net: MLPVectorField):
+        self.net = net
+
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor):
+        """
+        Args:
+            - x: (bs, dim)
+            - t: (bs, dim)
+        Returns:
+            - u_t: (bs, dim)
+        """
+        return self.net(x, t)
+    
+
+class LangevinFlowSDE(SDE):
+    def __init__(self, flow_model: MLPVectorField, score_model: MLPScore, sigma: float):
+        """
+        Args:
+        - path: the ConditionalProbabilityPath object to which this vector field corresponds
+        - z: the conditioning variable, (1, dim)
+        """
+        super().__init__()
+        self.flow_model = flow_model
+        self.score_model = score_model
+        self.sigma = sigma
+
+    def drift_coefficient(self, x: torch.Tensor, t: torch.Tensor):
+        """
+        Args:
+            - x: state at time t, shape (batch_size, dim)
+            - t: time, shape (bs,.)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        return self.flow_model(x,t) + 0.5 * self.sigma ** 2 * self.score_model(x, t)
+
+    def diffusion_coefficient(self, x: torch.Tensor, t: torch.Tensor):
+        """
+        Args:
+            - x: state at time t, shape (batch_size, dim)
+            - t: time, shape (batch_size,.)
+        Returns:
+            - u_t(x|z): shape (batch_size, dim)
+        """
+        return self.sigma * torch.randn_like(x)
