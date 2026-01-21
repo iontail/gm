@@ -3,37 +3,42 @@ import argparse
 import torch.nn as nn
 
 from torchvision import transforms
+from typing import List
 
 from trainer import VAELossGenerator
 from utils import get_dataloader, Utils
 
 
 def get_args():
-    args = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser()
 
-    args.add_argument('--model', type=str, default='vae', choices=['vae'])
-    args.add_argument('--seed', type=int, default=42)
-    args.add_argument('--device', type=str, default='auto')
-    args.add_argument('--data_name', type=str, default='cifar10', choices=['mnist', 'cifar10'])
-
-
-    args.add_argument('--epochs', type=int, default=100)
-    args.add_argument('--batch_size', type=int, default=128)
-    args.add_argument('--optimizer', type=str, default='adam', choices=['sgd', 'adam', 'adamw'])
-    args.add_argument('--lr', type=float, default=1e-3)
-    args.add_argument('--weight_decay', type=float, default=1e-5)
-    args.add_argument('--grad_clip', type=float, default=1.0, help="set to negative value to disable grad clip")
+    parser.add_argument('--model', type=str, default='vae', choices=['vae'])
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--device', type=str, default='auto')
+    parser.add_argument('--data_name', type=str, default='cifar10', choices=['mnist', 'cifar10'])
+    parser.add_argument('--use_wandb', action='store_true')
+    parser.add_argument('--use_board', action='store_true', help="Whether to use tensro board for logging.")
 
 
-    args.add_argument('--train_path', type=str, default='./data/train')
-    args.add_argument('--val_path', type=str, default='./data/val')
-    args.add_argument('--test_path', type=str, default='./data/test')
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--optimizer', type=str, default='adam', choices=['sgd', 'adam', 'adamw'])
+    parser.add_argument('--scheduler', type=str, default='constant', choices=['constant', 'cosine', 'step'])
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--weight_decay', type=float, default=1e-5)
+    parser.add_argument('--grad_clip', type=float, default=1.0, help="Set to negative value to disable grad clip")
+    parser.add_argument('--val_freq', type=int, default=-1, help="Evaluation frequency. Set default -1 to unactivate the evaluation step.")
 
-    args.add_argument('--num_workers', type=int, default=2)
-    args.add_argument('--img_size', type=int, default=32)
+
+    parser.add_argument('--train_path', type=str, default='./data/train')
+    parser.add_argument('--val_path', type=str, default='./data/val')
+    parser.add_argument('--test_path', type=str, default='./data/test')
+
+    parser.add_argument('--num_workers', type=int, default=2)
+    parser.add_argument('--img_size', type=int, default=32)
 
 
-    args = args.parse_args()
+    args = parser.parse_args()
 
     if args.data in ['mnist', 'cifar10']:
         args.img_size = 32
@@ -41,35 +46,6 @@ def get_args():
         args.img_size = 64 # please define image size for other dataset
 
     return args
-
-
-class Trainer:
-    def __init__(self,
-                 loss_generator: nn.Module,
-                 optimizer: torch.optim.Optimizer,
-                 args,
-                 utils: Utils,
-                 device: str = 'cpu',
-                 **kwargs):
-
-        
-        self.loss_generator = loss_generator
-        self.model = loss_generator.model
-        self.optimizer = optimizer
-        self.args = args
-        self.utils = utils
-        self.device = device
-
-
-
-    def train():
-        pass
-
-    def validate():
-        pass
-
-
-
 
 def main():
     args = get_args()
@@ -118,17 +94,17 @@ def main():
     model = utils._get_model(model_name=args.model, img_size=args.img_size).to(device)
     loss_generator = utils._get_trainer(model_name=args.model).to(device)
     optimizer = utils._setup_optimizer(params=loss_generator.model.parameters(), args=args)
-
-    trainer = Trainer(loss_generator=loss_generator,
-                      optimizer=optimizer,
-                      args=args,
-                      utils=utils,
-                      device=device
-                      )
+    scheduler = utils._get_scheduler(optimizer, args.scheduler) # more arguments
     
-
-    trainer.train()
-    trainer.validate()
+    trainer_dict = {
+        "model": model,
+        "optimizer": optimizer,
+        "args": args,
+        "scheduler": scheduler,
+        "utils": utils,
+        "device": device
+    }
+    trainer = utils._get_trainer(args.model, trainer_dict)
 
 
 if __name__ == "__main__":

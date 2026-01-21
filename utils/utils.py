@@ -66,16 +66,16 @@ class Utils:
         
 
     @staticmethod
-    def _get_trainer(self, model: nn.Module, **kwargs):
-        loss_name = loss_name.lower()
+    def _get_trainer(model_name: str, **kwargs):
+        model_name = model_name.lower()
 
-        if loss_name == 'vae':
-            return VAETrainer(model, **kwargs)
+        if model_name == 'vae':
+            return VAETrainer(**kwargs)
         else:
-            raise NotImplementedError(f'Loss generator {loss_name} is not implemented.')
+            raise NotImplementedError(f'Trainer for {model_name} is not implemented.')
 
     @staticmethod   
-    def _get_scheduler(self,
+    def _get_scheduler(
                        optimizer,
                        scheduler_name: str = 'constant',
                        warmup_epochs: int = 0,
@@ -94,7 +94,7 @@ class Utils:
                              gamma)
     
     @staticmethod
-    def _setup_optimizer(self, params, args):
+    def _setup_optimizer(params, args):
         
         optimizer_name = args.optimizer.lower()
         if optimizer_name == 'sgd':

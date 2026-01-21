@@ -1,10 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
+import os
 
+from typing import List
 from torch.utils.data import DataLoader
 from abc import ABC, abstractmethod
 from tqdm import tqdm
+from datetime import datetime
 
 from utils import Utils
 from .models import VAE
@@ -21,6 +25,7 @@ class Trainer(ABC):
                  model: nn.Module,
                  optimizer: torch.optim.Optimizer,
                  args,
+                 scheduler: torch.optim.lr_scheduler.LambdaLR = None,
                  utils: Utils = Utils(),
                  device: str = 'cpu',
                  **kwargs):
@@ -29,26 +34,58 @@ class Trainer(ABC):
         self.model = model
         self.optimizer = optimizer
         self.args = args
+        self.scheduler = scheduler
         self.utils = utils
         self.device = device
 
+        self.use_wandb = args.use_wandb
+        self.use_board = args.use_board
+        self.val_freq = args.val_freq
+
+        os.makedirs('./checkpoints', exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m_%H%M")
+        self.prefix = f"{args.model.lower()}_{timestamp}"
+
     @abstractmethod
     def get_loss(self, x: torch.Tensr):
+        """
+        Don't forget to move data and target to self.model's hardware. 
+        Use '.to(self.model.device)' method.
+        """
         pass
 
-    def train(self, dl: DataLoader, val_dl: DataLoader = None):
+    def train(self, train_dl: DataLoader, val_dl: DataLoader = None):
 
-        
+        if self.use_wandb:
+            wandb.init(
+                project=f"LCH_Generative_Models",
+                name=f"{self.args.model.lower()}",
+                config={
+                    'model': self.args.model,
+                    'data': self.args.data_name,
+                    'optimizer': self.args.optimizer,
+                    'scheduler': self.args.scheduler,
+                    'epochs': self.args.epochs,
+                    'batch_size': self.args.batch_size,
+                    'lr': self.args.lr,
+                    'weight_decay': self.args.weight_decay
+                    }
+                )
+            
+        if self.use_board:
+            pass
+
+        train_best_loss = float('inf')
+        val_best_loss = float('inf')
         epochs = self.args.epochs
-
         for epoch in range(epochs):
             self.model.train()
 
             total_loss = 0
             samples = 0
-            for i, batch in enumerate(tqdm(dl, leave=False)):
-                loss = self.get_loss(batch)
+            for i, batch in enumerate(tqdm(train_dl, leave=False)):
 
+                loss = self.get_loss(batch)
                 self.optimizer.zero_grad()
                 loss.backward()
 
@@ -56,28 +93,80 @@ class Trainer(ABC):
                     nn.utils.clip_grad_norm(self.model.parameters(), self.args.grad_clip)
                 self.optimizer.step()
 
-                total_loss += loss.item() * batch.shape[0]
-                samples += batch.shape[0]
+                total_loss += loss.item() * batch[0].size(0)
+                samples += batch[0].size(0)
 
             total_loss /= samples
+            train_metrics = {'loss': total_loss}
+            if total_loss < train_best_loss:
+                    train_best_loss = total_loss
 
-            if val_dl is not None:
-                self.validate(val_dl)
 
+            val_metrics = {}
+            if (val_dl is not None) and ((epoch + 1) % self.val_freq == 0 and (epoch == epochs - 1)):
+                val_total_loss = self.validate(val_dl)
+                val_metrics['loss'] = val_total_loss
+
+                if val_total_loss < val_best_loss:
+                    val_best_loss = val_total_loss
+
+                    save_path = os.path.join('./checkpoints', f"{self.prefix}_best")
+                    torch.save(self.model.parameters(), save_path)
+
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            all_metrics = {'train': train_metrics, 'val': val_metrics}
+            self.log_metrics(all_metrics, [train_best_loss, val_best_loss], epoch)
+
+            save_path = os.path.join('./checkpoints', self.prefix)
+            torch.save({
+                "epoch": epoch,
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict() if self.scheduler else None,
+                "metric": all_metrics, # needs to change whether saving the best checkpoints showing best performance
+                }, save_path)
+
+
+    @torch.no_grad()
     def validate(self, dl: DataLoader):
         self.model.eval()
 
         total_loss = 0
         samples = 0
-        for batch in enumerate(tqdm(dl, leave=False)):
+        for batch in tqdm(dl, leave=False):
             loss = self.get_loss(batch)
 
-            total_loss += loss.item() * batch.shape[0]
-            samples += batch.shape[0]
+            total_loss += loss.item() * batch[0].size(0)
+            samples += batch[0].size(0)
 
         total_loss /= samples
+        return total_loss
 
-        print(f"Validation Loss: {total_loss:.5f}")
+    def log_metrics(self, metrics: dict, best: List[float], epoch: int):
+        log_list = []
+        for phase, results in metrics.items(): # phase == 'train' or 'val'
+            if not results:
+                continue
+
+            if self.use_wandb:
+                metric_dict = {f"{self.args.data_name}/{phase}/{k}": v for k, v in results.items()}
+                wandb.log(metric_dict, step=epoch)
+
+            metric_items = [f"{k}: {v:.4f}" for k, v in results.items()]
+            log_list.append(f"{phase}: {' | '.join(metric_items)}")
+
+        print(f"Epoch {epoch} | {' || '.join(log_list)}")
+
+
+        current_lr = self.optimizer.param_groups[0]['lr']
+        if self.use_wandb:
+            wandb.log({
+                'learning_rate': current_lr,
+                'train_best': best[0],
+                'val_best': best[1]
+            }, step=epoch)
 
 
 class VAETrainer(Trainer):
