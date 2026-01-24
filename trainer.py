@@ -12,7 +12,7 @@ from datetime import datetime
 
 from utils import Utils
 from .models import VAE
-from .models.diffusion import ConditionalProbabilityPath, Alpha, Beta, LinearAlpha, SquareRootBeta
+from .models.diffusion import ConditionalProbabilityPath, Alpha, Beta, LinearAlpha, SquareRootBeta, Sampleable
 
 """
 The target model should be assigned to self.model!!
@@ -281,50 +281,209 @@ class RepresentationTransformer(nn.Module):
     def noise2vf(self, x: torch.Tensor, t: torch.Tensor):
         return self.score2vf(self.noise2score(x, t), t)
 
+
+
+class SDETrainer(Trainer):
+    def __init__(self,
+                 model: nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 args,
+                 scheduler: torch.optim.lr_scheduler.LambdaLR = None,
+                 utils: Utils = Utils(),
+                 device: str = 'cpu',
+                 **kwargs):
+
+        super().__init__(model, optimizer, args, scheduler, utils, device, kwargs)
+        self.p_train = None
+        self.p_val = None
+
+    def sample_by_mode(self, batch_size: int, mode: str='val'):
+        if mode == 'train' and self.p_train is not None:
+            return self.train_path.p_data.sample(batch_size)
+        elif mode == 'val' and self.val_path is not None:
+            return self.val_path.p_data.sample(batch_size)
+        else:
+            raise ValueError(f"Path for {mode} is not defined.")
         
-class ConditionalFlowMatchingTrainer(Trainer):
+    @abstactmethod
+    def get_loss(self, batch_size: int, mode: str='val'):
+        """
+        Don't forget to Sampler in the path module to self.model's hardware. 
+        Use '.to(self.model.device)' method.
+        """
+
+    def train(self, train_path: Sampleable, val_path: Sampleable = None):
+        if self.use_wandb:
+            wandb.init(
+                project=f"LCH_Generative_Models",
+                name=f"{self.args.model.lower()}",
+                config={
+                    'model': self.args.model,
+                    'data': self.args.data_name,
+                    'optimizer': self.args.optimizer,
+                    'scheduler': self.args.scheduler,
+                    'epochs': self.args.epochs,
+                    'batch_size': self.args.batch_size,
+                    'lr': self.args.lr,
+                    'weight_decay': self.args.weight_decay
+                    }
+                )
+            
+        if self.use_board:
+            pass
+
+        # we sample the data points
+        self.train_path = train_path
+        self.val_path = val_path
+
+        train_best_loss = float('inf')
+        val_best_loss = float('inf')
+        epochs = self.args.epochs
+        for epoch in tqdm(range(epochs), leave=False):
+            self.model.train()
+
+            loss = self.get_loss(self.args.batch_size, mode='train')
+            self.optimizer.zero_grad()
+            loss.backward()
+
+            if self.args.grad_clip() > 0:
+                nn.utils.clip_grad_norm(self.model.parameters(), self.args.grad_clip)
+            self.optimizer.step()
+
+            train_metrics = {'loss': loss.item()}
+            if loss.item() < train_best_loss:
+                    train_best_loss = loss.item()
+
+
+            val_metrics = {}
+            if (val_dl is not None) and ((epoch + 1) % self.val_freq == 0 and (epoch == epochs - 1)):
+                val_loss = self.validate(val_dl, mode='val')
+                val_metrics['loss'] = val_loss
+
+                if val_loss < val_best_loss:
+                    val_best_loss = val_loss
+
+                    save_path = os.path.join('./checkpoints', f"{self.prefix}_best")
+                    torch.save(self.model.parameters(), save_path)
+
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            all_metrics = {'train': train_metrics, 'val': val_metrics}
+            self.log_metrics(all_metrics, [train_best_loss, val_best_loss], epoch)
+
+            save_path = os.path.join('./checkpoints', self.prefix)
+            torch.save({
+                "epoch": epoch,
+                "model": self.model.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict() if self.scheduler else None,
+                "metric": all_metrics, # needs to change whether saving the best checkpoints showing best performance
+                }, save_path)
+
+
+    @torch.no_grad()
+    def validate(self, path):
+        self.val_apth = path
+        self.model.eval()
+        loss = self.get_loss(self.args.batch_size, mode='val')
+        return loss.item()
+
+    def log_metrics(self, metrics: dict, best: List[float], epoch: int):
+        log_list = []
+        for phase, results in metrics.items(): # phase == 'train' or 'val'
+            if not results:
+                continue
+
+            if self.use_wandb:
+                metric_dict = {f"{self.args.data_name}/{phase}/{k}": v for k, v in results.items()}
+                wandb.log(metric_dict, step=epoch)
+
+            metric_items = [f"{k}: {v:.4f}" for k, v in results.items()]
+            log_list.append(f"{phase}: {' | '.join(metric_items)}")
+
+        print(f"Epoch {epoch} | {' || '.join(log_list)}")
+
+
+        current_lr = self.optimizer.param_groups[0]['lr']
+        if self.use_wandb:
+            wandb.log({
+                'learning_rate': current_lr,
+                'train_best': best[0],
+                'val_best': best[1]
+            }, step=epoch)
+
+
+
+class ConditionalFlowMatchingTrainer(SDETrainer):
     """
     Generate the flow matching loss:
     E_{z ~ p_data, t ~ Unif[0, 1], x ~ p_t(x|z)}[||u_theta - u_target||^2]
 
-    Before defining Loss Generator, you should define the Sampler class for the data to use
+    Before defining 'get_loss' method, you should define the Sampler class for the data to use
     The newly defined Sampler class is used as p_data in Probability Path calss.
     """
-    def __init__(self, path: ConditionalProbabilityPath, model: nn.Module, **kwargs):
-        super().__init__()
-        self.path = path
-        self.model = model
+    def __init__(self,
+                 model: nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 args,
+                 scheduler: torch.optim.lr_scheduler.LambdaLR = None,
+                 utils: Utils = Utils(),
+                 device: str = 'cpu',
+                 **kwargs):
 
-    def get_loss(self, batch_size: int):
-        z = self.path.p_data.sample(batch_size) # (bs, dim)
+        super().__init__(model, optimizer, args, scheduler, utils, device, **kwargs)
+
+    def get_loss(self, batch_size: int, mode: str='val'):
+        z = self.sample_by_mode(batch_size, mode) # (bs, dim)
         t = torch.rand(batch_size, 1).to(z)     # (bs, 1)
         x = self.path.sample_conditional_path(x, z, t)
 
         ut_theta = self.model(x, t)
-        ut_target = self.path.conditional_vector_field(x, z, t)
+
+        if mode == 'train' and self.p_train is not None:
+            ut_target = self.train_path.conditional_vector_field(x, z, t)
+        elif mode == 'val' and self.val_path is not None:
+            ut_target = self.val_path.conditional_vector_field(x, z, t)
+        else:
+            raise ValueError(f"Path for {mode} is not defined.")
+
         mse = F.mse_loss(ut_theta, ut_target)
         return mse
 
 
-class ConditionalScoreMatchingTrainer(Trainer):
+class ConditionalScoreMatchingTrainer(SDETrainer):
     """
     Generate the score matching loss:
     E_{z ~ p_data, t ~ Unif[0, 1], x ~ p_t(x|z)}[||s_theta - s_target||^2]
 
-    Before defining Loss Generator, you should define the Sampler class for the data to use
+    Before defining 'get_loss' method, you should define the Sampler class for the data to use
     The newly defined Sampler class is used as p_data in Probability Path calss.
     """
-    def __init__(self, path: ConditionalProbabilityPath, model: nn.Module, **kwargs):
-        super().__init__()
-        self.path = path
-        self.model = model
+    def __init__(self,
+                 model: nn.Module,
+                 optimizer: torch.optim.Optimizer,
+                 args,
+                 scheduler: torch.optim.lr_scheduler.LambdaLR = None,
+                 utils: Utils = Utils(),
+                 device: str = 'cpu',
+                 **kwargs):
 
-    def get_loss(self, batch_size: int):
-        z = self.path.p_data.sample(batch_size) # (bs, dim)
+        super().__init__(model, optimizer, args, scheduler, utils, device, **kwargs)
+
+    def get_loss(self, batch_size: int, mode: str='val'):
+        z = self.sample_by_mode(batch_size, mode) # (bs, dim)
         t = torch.rand(batch_size, 1).to(z)     # (bs, 1)
         x = self.path.sample_conditional_path(x, z, t)
 
         s_theta = self.model(x, t)
-        s_target = self.path.conditional_score(x, z, t)
+        
+        if mode == 'train' and self.p_train is not None:
+            s_target = self.train_path.conditional_score(x, z, t)
+        elif mode == 'val' and self.val_path is not None:
+            s_target = self.val_path.conditional_score(x, z, t)
+        else:
+            raise ValueError(f"Path for {mode} is not defined.")
+
         mse = F.mse_loss(s_theta, s_target)
         return mse

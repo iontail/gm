@@ -123,9 +123,3 @@ def get_scheduler(optimizer,
             return WarmupStepScheduler(optimizer, warmup_epochs, milestones, warmup_start_lr, gamma=gamma) 
         else:
             return WarmupStepScheduler(optimizer, 0, milestones, warmup_start_lr, gamma=gamma)
-        
-
-
-
-
-    

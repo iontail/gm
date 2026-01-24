@@ -153,4 +153,3 @@ class GaussianMixture(torch.nn.Module, Sampleable, Density):
         return cls(means, covs, weights)
 
 
-

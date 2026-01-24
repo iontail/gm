@@ -6,13 +6,16 @@ from torchvision import transforms
 from typing import List
 
 from trainer import VAELossGenerator
-from utils import get_dataloader, Utils
+from utils import get_dataloader, Utils, get_sampler
+from models.diffusion.p_path import GaussianConditionalProbabilityPath, LinearAlpha, LinearBeta
+
 
 
 def get_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--model', type=str, default='vae', choices=['vae'])
+    parser.add_argument('--learning', type=str, default='gan', choices=['vae', 'gan', 'sde'])
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--device', type=str, default='auto')
     parser.add_argument('--data_name', type=str, default='cifar10', choices=['mnist', 'cifar10'])
@@ -67,32 +70,48 @@ def main():
     ])
 
 
-    train_dl = get_dataloader(data_name=args.data_name,
-                              batch_size=args.batch_size,
-                              data_path=args.train_path,
-                              transform=train_transforms,
-                              img_size=args.img_size,
-                              train=True,
-                              shuffle=True,
-                              num_workers=args.num_workers,
-                              collate_fn=False,
-                              num_workers=args.num_workers
-                              )
-    
-    val_transforms = get_dataloader(data_name=args.data_name,
-                                    batch_size=args.batch_size,
-                                    data_path=args.val_path,
-                                    transform=val_transforms,
-                                    img_size=args.img_size,
-                                    train=False,
-                                    shuffle=False,
-                                    num_workers=args.num_workers,
-                                    collate_fn=False,
-                                    num_workers=args.num_workers
-                                    )
+    if args.learning == 'sde':
+        train_sampler = get_sampler(train_path, args.img_size, train_transforms).to(device)
+        train_path = GaussianConditionalProbabilityPath(
+            p_data=train_sampler,
+            p_simple_shape=[1, 32, 32], # please check the shape of data
+            alpha=LinearAlpha(),
+            beta= LinearBeta()
+        ).to(device)
+
+        val_sampler = get_sampler(val_path, args.img_size, train_transforms).to(device)
+        val_path = GaussianConditionalProbabilityPath(
+            p_data=val_sampler,
+            p_simple_shape=[1, 32, 32], # please check the shape of data
+            alpha=LinearAlpha(),
+            beta= LinearBeta()
+        ).to(device)
+    else:
+        train_dl = get_dataloader(data_name=args.data_name,
+                                batch_size=args.batch_size,
+                                data_path=args.train_path,
+                                transform=train_transforms,
+                                img_size=args.img_size,
+                                train=True,
+                                shuffle=True,
+                                num_workers=args.num_workers,
+                                collate_fn=False,
+                                num_workers=args.num_workers
+                                )
+        
+        val_dl = get_dataloader(data_name=args.data_name,
+                                        batch_size=args.batch_size,
+                                        data_path=args.val_path,
+                                        transform=val_transforms,
+                                        img_size=args.img_size,
+                                        train=False,
+                                        shuffle=False,
+                                        num_workers=args.num_workers,
+                                        collate_fn=False,
+                                        num_workers=args.num_workers
+                                        )
     
     model = utils._get_model(model_name=args.model, img_size=args.img_size).to(device)
-    loss_generator = utils._get_trainer(model_name=args.model).to(device)
     optimizer = utils._setup_optimizer(params=loss_generator.model.parameters(), args=args)
     scheduler = utils._get_scheduler(optimizer, args.scheduler) # more arguments
     
@@ -104,7 +123,19 @@ def main():
         "utils": utils,
         "device": device
     }
+
     trainer = utils._get_trainer(args.model, trainer_dict)
+
+    if args.learning == 'sde':
+        trainer.train(train_path, val_path)
+        final_loss = trainer.validate(val_path)
+    else:
+        trainer.train(train_dl=train_dl, val_dl=val_dl)
+        final_loss = trainer.validate(val_dl)
+
+    
+    print(f"Final Loss: {final_loss}")
+
 
 
 if __name__ == "__main__":

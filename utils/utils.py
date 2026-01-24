@@ -52,7 +52,18 @@ class Utils:
 
     @staticmethod
     def _setup_device(device: str = 'auto'):
-        pass
+        if device == 'auto':
+            if torch.cuda.is_available():
+                use_device = torch.device('cuda')
+            else:
+                use_device = torch.device('cpu')
+
+        else:
+            if device not in ['cuda', 'cpu']:
+                raise ValueError(f"Device must be one of {['cuda', 'cpu']}. Got {device}")
+            
+            use_device = torch.device(device)
+        return use_device
 
 
     @staticmethod
