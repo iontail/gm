@@ -20,16 +20,16 @@ class Alpha(ABC):
     def __init__(self):
         # check a(0) = 0 and a(1) = 1
         # torch.allclose check the equality considering floating-point representation error
-        assert torch.allclose(self(torch.zeros(1, 1)), torch.zeros(1, 1))
-        assert torch.allclose(self(torch.ones(1, 1)), torch.ones(1, 1))
+        assert torch.allclose(self(torch.zeros(1, 1, 1, 1)), torch.zeros(1, 1, 1, 1))
+        assert torch.allclose(self(torch.ones(1, 1, 1, 1)), torch.ones(1, 1, 1, 1))
 
     @abstractmethod
     def __call__(self, t: torch.Tensor):
         """
         Args:
-            - t: time. Shape - (num_samples, 1)
+            - t: time. Shape - (num_samples, 1, 1, 1)
         Returns:
-            - alpha_t: Shape - (num_samples, 1)
+            - alpha_t: Shape - (num_samples, 1, 1, 1)
         """
         pass
 
@@ -37,29 +37,29 @@ class Alpha(ABC):
         """
         Evaluate d/dt alpha_t.
         Args:
-            - t: time. Shape - (num_samples, 1)
+            - t: time. Shape - (num_samples, 1, 1, 1)
         Returns:
-            - d/dt alpha_t. Shape - (num_samples, 1)
+            - d/dt alpha_t. Shape - (num_samples, 1, 1, 1)
         """
-        t = t.unsqueeze(1) # (num_samples, 1, 1)
-        dt = vmap(jacrev(self))(t) # (num_samples, 1, 1, 1, 1)
-        return dt.view(-1, 1)
+        t = t.unsqueeze(1) # (num_samples, 1, 1, 1, 1)
+        dt = vmap(jacrev(self))(t) 
+        return dt.view(-1, 1, 1, 1)
     
 
 class Beta(ABC):
     def __init__(self):
         # check b(0) = 1 and b(1) = 0
-        assert torch.allclose(self(torch.zeros(1,1)), torch.ones(1,1))
-        assert torch.allclose(self(torch.ones(1,1)), torch.zeros(1,1))
+        assert torch.allclose(self(torch.zeros(1, 1, 1, 1)), torch.ones(1,1, 1, 1))
+        assert torch.allclose(self(torch.ones(1,1, 1, 1)), torch.zeros(1,1, 1, 1))
 
     @abstractmethod
     def __call__(self, t: torch.Tensor) -> torch.Tensor:
         pass
 
     def dt(self, t: torch.Tensor) -> torch.Tensor:
-        t = t.unsqueeze(1) # (num_samples, 1, 1)
-        dt = vmap(jacrev(self))(t) # (num_samples, 1, 1, 1, 1)
-        return dt.view(-1, 1)
+        t = t.unsqueeze(1) # (num_samples, 1, 1, 1, 1)
+        dt = vmap(jacrev(self))(t)
+        return dt.view(-1, 1, 1, 1)
 
 class LinearAlpha(Alpha):
     """
@@ -95,9 +95,9 @@ class LinearBeta(Beta):
     def __call__(self, t: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            - t: time (num_samples, 1)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - beta_t (num_samples, 1)
+            - beta_t (num_samples, 1, 1, 1)
         """
         return 1-t
 
@@ -129,25 +129,26 @@ class ConditionalProbabilityPath(nn.Module, ABC):
         """
         Samples from the marginal distribution p_t(x) = p_t(x|z) p(z)
         Args:
-            - t: time (num_samples, 1)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - x: samples from p_t(x), (num_samples, dim)
+            - x: samples from p_t(x), (num_samples, c, h, w)
         """
         num_samples = t.shape[0]
         # Sample conditioning variable z ~ p(z)
-        z = self.sample_conditioning_variable(num_samples) # (num_samples, dim)
+        z, _ = self.sample_conditioning_variable(num_samples) # (num_samples, c, h, w)
         # Sample conditional probability path x ~ p_t(x|z)
-        x = self.sample_conditional_path(z, t) # (num_samples, dim)
+        x = self.sample_conditional_path(z, t) # (num_samples, c, h, w)
         return x
 
     @abstractmethod
-    def sample_conditioning_variable(self, num_samples: int):
+    def sample_conditioning_variable(self, num_samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Samples the conditioning variable z
+        Samples the conditioning variable z and label y
         Args:
             - num_samples: the number of samples
         Returns:
-            - z: samples from p(z), (num_samples, dim)
+            - z: samples from p(z), (num_samples, c, h, w)
+            - y: label, (num_samples, c, h, w)
         """
         pass
 
@@ -156,10 +157,10 @@ class ConditionalProbabilityPath(nn.Module, ABC):
         """
         Samples from the conditional distribution p_t(x|z)
         Args:
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - z: conditioning variable (num_samples, c, h, w)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - x: samples from p_t(x|z), (num_samples, dim)
+            - x: samples from p_t(x|z), (num_samples, c, h, w)
         """
         pass
 
@@ -168,11 +169,11 @@ class ConditionalProbabilityPath(nn.Module, ABC):
         """
         Evaluates the conditional vector field u_t(x|z)
         Args:
-            - x: position variable (num_samples, dim)
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - x: position variable (num_samples, c, h, w)
+            - z: conditioning variable (num_samples, c, h, w)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - conditional_vector_field: conditional vector field (num_samples, dim)
+            - conditional_vector_field: conditional vector field (num_samples, c, h, w)
         """
         pass
 
@@ -181,17 +182,17 @@ class ConditionalProbabilityPath(nn.Module, ABC):
         """
         Evaluates the conditional score of p_t(x|z)
         Args:
-            - x: position variable (num_samples, dim)
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - x: position variable (num_samples, c, h, w)
+            - z: conditioning variable (num_samples, c, h, w)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - conditional_score: conditional score (num_samples, dim)
+            - conditional_score: conditional score (num_samples, c, h, w)
         """
         pass
 
 class GaussianConditionalProbabilityPath(ConditionalProbabilityPath):
-    def __init__(self, p_data: Sampleable, alpha: Alpha, beta: Beta):
-        p_simple = Gaussian.isotropic(p_data.dim, 1.0)
+    def __init__(self, p_data: Sampleable, p_simple_shape: List[int], alpha: Alpha, beta: Beta):
+        p_simple = IsotropicGaussian(shape=p_simple_shape, std=1.0)
         super().__init__(p_simple, p_data)
         self.alpha = alpha
         self.beta = beta
@@ -233,10 +234,10 @@ class LinearConditionalProbabilityPath(ConditionalProbabilityPath):
         """
         Samples the random variable X_t = (1-t) X_0 + tz
         Args:
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - z: conditioning variable (num_samples, c, h, w)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - x: samples from p_t(x|z), (num_samples, dim)
+            - x: samples from p_t(x|z), (num_samples, c, h, w)
         """
         x0 = self.p_simple.sample(z.shape[0])
         return (1-t) * x0 + t*z
@@ -247,11 +248,11 @@ class LinearConditionalProbabilityPath(ConditionalProbabilityPath):
         Evaluates the conditional vector field u_t(x|z) = (z - x) / (1 - t)
         Note: Only defined on t in [0,1)
         Args:
-            - x: position variable (num_samples, dim)
-            - z: conditioning variable (num_samples, dim)
-            - t: time (num_samples, 1)
+            - x: position variable (num_samples, c, h, w)
+            - z: conditioning variable (num_samples, c, h, w)
+            - t: time (num_samples, 1, 1, 1)
         Returns:
-            - conditional_vector_field: conditional vector field (num_samples, dim)
+            - conditional_vector_field: conditional vector field (num_samples, c, h, w)
         """
         return (z - x) / (1 - t)
 

@@ -128,6 +128,40 @@ class Utils:
                         betas=(0.9, 0.999), # uses default (change if needed)
                         weight_decay=args.weight_decay
                         )
+
+
+    @staticmethod
+    def model_size_b(model: nn.Module) -> int:
+        """
+        Returns model size in bytes. Based on https://discuss.pytorch.org/t/finding-model-size/130275/2
+        Args:
+        - model: self-explanatory
+        Returns:
+        - size: model size in bytes
+        """
+        MiB = 1024 ** 2
+        size = 0
+        for param in model.parameters():
+            size += param.nelement() * param.element_size()
+        for buf in model.buffers():
+            size += buf.nelement() * buf.element_size()
+        return size
+
+
+    @staticmethod
+    def record_every(num_timesteps: int, record_every: int):
+        """
+        Compute the indices to record in the trajectory given a record_every parameter
+        """
+
+        if record_every == 1:
+            return torch.arange(num_timesteps)
+        return torch.cat(
+            [
+                torch.arange(0, num_timesteps - 1, record_every),
+                torch.tensor([num_timestpes - 1]),
+            ]
+        )
     
 
         

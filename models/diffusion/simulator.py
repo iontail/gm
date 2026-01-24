@@ -12,7 +12,7 @@ You can check the details in https://diffusion.csail.mit.edu/2025/index.html
 
 class Simulator(ABC):
     @abstractmethod
-    def step(self, xt: torch.Tensor, t: torch.Tensor, dt: torch.Tensor):
+    def step(self, xt: torch.Tensor, t: torch.Tensor, dt: torch.Tensor, **kwargs):
         """
         Takes one simulation step.
         Subtext:
@@ -20,47 +20,49 @@ class Simulator(ABC):
               We simulate the ODE(or SDE) with numerical methods such as Euler methods.
 
         Args:
-            - xt: state at time t. Shape - (batch_size, dim)
-            - t: time. Shape - (batch_size, 1)
-            - dt: tine. Shape - (batch_size, 1)
+            - xt: state at time t. Shape - (batch_size, c, h, w)
+            - t: time. Shape - (batch_size, 1, 1, 1)
+            - dt: tine. Shape - (batch_size, 1, 1, 1)
         Returns:
-            - nxt: state at time (t + dt). Shape - (batch_size, dim)
+            - nxt: state at time (t + dt). Shape - (batch_size, c, h, w)
         """
         pass
 
     @torch.no_grad()
-    def simulate(self, x: torch.Tensor, ts: torch.Tensor):
+    def simulate(self, x: torch.Tensor, ts: torch.Tensor, **kwargs):
         """
         Simulates using the discretization gives by ts
         Args:
-            - x: initial state at time ts[0]. Shape - (batch_size, dim)
-            - ts: timesteps. Shape - (batch_size, num_timesteps, 1)
+            - x: initial state at time ts[0]. Shape - (batch_size, c, h, w)
+            - ts: timesteps. Shape - (batch_size, num_timesteps, 1, 1, 1)
         Returns:
-            - x_final: final state at time ts[-1]. Shape - (batch_size, dim)
+            - x_final: final state at time ts[-1]. Shape - (batch_size, c, h, w)
         """
-        for t_idx in range(len(ts) - 1):
+        nts = ts.shape[1]
+        for t_idx in range(nts - 1):
             t = ts[:, t_idx]
             h = ts[:, t_idx + 1] - ts[:, t_idx]
-            x = self.step(x, t, h)
+            x = self.step(x, t, h, **kwargs)
         return x
     
     @torch.no_grad()
-    def simulate_with_trajectory(self, x: torch.Tensor, ts: torch.Tensor):
+    def simulate_with_trajectory(self, x: torch.Tensor, ts: torch.Tensor, **kwargs):
         """
         Simulates using the discretization gives by ts
         Returns the list of the position to the times step 'ts' when simulating
         Args:
-            - x: initial state at time ts[0]. Shape - (batch_size, dim)
-            - ts: timesteps. Shape - (batch_size, num_timesteps, 1)
+            - x: initial state at time ts[0]. Shape - (batch_size, c, h, w)
+            - ts: timesteps. Shape - (batch_size, num_timesteps, 1, 1, 1)
         Returns:
-            - xs: trajectory of x_ts over ts. Shape - (batch_size, num_timesteps, dim)
+            - xs: trajectory of x_ts over ts. Shape - (batch_size, num_timesteps, c, h, w)
         """
 
         xs = [x.clone()]
-        for t_idx in range(len(ts) - 1):
+        nts = ts.shape[1]
+        for t_idx in range(nts - 1):
             t = ts[:, t_idx]
             h = ts[:, t_idx + 1] - ts[:, t_idx]
-            x = self.step(x, t, h)
+            x = self.step(x, t, h, **kwargs)
             xs.append(x.clone())
         return torch.stack(xs, dim=1)
     
@@ -69,15 +71,15 @@ class EulerSimulator(Simulator):
     def __init__(self, ode: ODE):
         self.ode = ode
     
-    def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor):
+    def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor, **kwargs):
         # h: shape - ()
-        return xt + self.ode.drift_coefficient(xt, t) * h
+        return xt + self.ode.drift_coefficient(xt, t, **kwargs) * h
     
 class EulerMaruyamaSimulator(Simulator):
     def __init__(self, sde: SDE):
         self.sde = sde
 
-    def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor):
+    def step(self, xt: torch.Tensor, t: torch.Tensor, h: torch.Tensor, **kwargs):
         """
         dW_{t} must meet the two conditions
         1. Normal Increments
@@ -89,7 +91,7 @@ class EulerMaruyamaSimulator(Simulator):
         
         See detils in page 9 of https://arxiv.org/abs/2506.02070
         """
-        return xt + (self.sde.drift_coefficient(xt, t) * h) + (torch.sqrt(h) * self.sde.diffusion_coefficient * torch.randn_like(xt))
+        return xt + (self.sde.drift_coefficient(xt, t, **kwargd) * h) + (torch.sqrt(h) * self.sde.diffusion_coefficient(xt, t, **kwargs) * torch.randn_like(xt))
     
 
 

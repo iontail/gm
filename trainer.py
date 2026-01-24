@@ -332,6 +332,11 @@ class SDETrainer(Trainer):
         if self.use_board:
             pass
 
+        MiB = 1024**2
+        size_b = self.utils.model_size_b(self.model)
+        print(f'Training model with size: {size_b / MiB:.3f} MiB')
+        print("="*60)
+
         # we sample the data points
         self.train_path = train_path
         self.val_path = val_path

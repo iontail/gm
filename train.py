@@ -81,7 +81,7 @@ def main():
 
         val_sampler = get_sampler(val_path, args.img_size, train_transforms).to(device)
         val_path = GaussianConditionalProbabilityPath(
-            p_data=val_sampler,
+            p_data=val  _sampler,
             p_simple_shape=[1, 32, 32], # please check the shape of data
             alpha=LinearAlpha(),
             beta= LinearBeta()

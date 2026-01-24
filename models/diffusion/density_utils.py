@@ -5,6 +5,7 @@ import numpy as np
 
 from torch.func import vmap, jacrev
 from abc import ABC, abstractmethod
+from typing import Tuple, Optional, List
 
 """
 This code is from the 'MIT Computer Science Class 6.S184: Generative AI with Stochastic Differential Equations' LAB
@@ -45,15 +46,27 @@ class Sampleable(ABC):
     Distribution which can be sampled from
     """
     @abstractmethod
-    def sample(self, num_samples: int) -> torch.Tensor:
+    def sample(self, num_samples: int) -> Tuple[torch.Tensor, Optional[[torch.Tensor]]]:
         """
         Returns the log density at x.
         Args:
             - num_samples: the desired number of samples
         Returns:
-            - samples: Shape - (batch_size, dim)
+            - samples: Shape - (batch_size, ...)
+            - labels: Shape - (batch_size, label_dim)
         """
         pass
+
+class IsotropicGaussian(nn.Module, Sampleable):
+    def __init__(self, shape: List[int], std: float = 1.0):
+        super().__init__()
+
+        self.shape = shape
+        self.std = std
+        self.dummy = nn.Buffer(torch.zeros(1))
+
+    def sample(self, num_samples: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self.std * torch.randn(num_samples, *self.shape).to(self.dummy.device), None
 
 
 class Gaussian(nn.Module, Sampleable, Density):
